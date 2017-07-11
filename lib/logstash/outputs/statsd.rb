@@ -49,7 +49,7 @@ require "logstash/namespace"
 class LogStash::Outputs::Statsd < LogStash::Outputs::Base
   ## Regex stolen from statsd code
   RESERVED_CHARACTERS_REGEX = /[\:\|\@]/
-  config_name "statsd"
+  config_name "statsdng"
 
   # The hostname or IP address of the statsd server.
   config :host, :validate => :string, :default => "localhost"
@@ -76,6 +76,9 @@ class LogStash::Outputs::Statsd < LogStash::Outputs::Base
   # A timing metric. `metric_name => duration` as hash. `%{fieldname}` substitutions
   # are allowed in the metric names.
   config :timing, :validate => :hash, :default => {}
+
+  # The name of a field which is a hash containing timings to be appended
+  config :timing_field, :validate => :string, :default => nil
 
   # A count metric. `metric_name => count` as hash. `%{fieldname}` substitutions are
   # allowed in the metric names.
@@ -120,6 +123,20 @@ class LogStash::Outputs::Statsd < LogStash::Outputs::Base
       @client.timing(build_stat(event.sprintf(metric), sender),
                      event.sprintf(val), @sample_rate)
     end
+    if @timing_field and event[@timing_field]
+      event[@timing_field].each do |metric, val|
+        case metric
+          when "time_total", "view_runtime"
+            @client.timing(build_stat(event.sprintf(metric), sender),
+                       event.sprintf(val).to_f, @sample_rate)
+          when /^(.+)_runtime/
+            if event[@timing_field].has_key?("#{$1}_tally") and ( event[@timing_field]["#{$1}_tally"] > 0 )
+              @client.timing(build_stat(event.sprintf(metric), sender),
+                       event.sprintf(val).to_f, @sample_rate)
+            end
+          end
+        end
+      end
     @set.each do |metric, val|
       @client.set(build_stat(event.sprintf(metric), sender),
                     event.sprintf(val), @sample_rate)
